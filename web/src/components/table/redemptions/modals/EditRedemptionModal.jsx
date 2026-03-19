@@ -62,6 +62,7 @@ const EditRedemptionModal = (props) => {
     name: '',
     quota: 100000,
     count: 1,
+    register_enabled: false,
     expired_time: null,
   });
 
@@ -105,6 +106,7 @@ const EditRedemptionModal = (props) => {
     let localInputs = { ...values };
     localInputs.count = parseInt(localInputs.count) || 0;
     localInputs.quota = parseInt(localInputs.quota) || 0;
+    localInputs.register_enabled = Boolean(localInputs.register_enabled);
     localInputs.name = name;
     if (!localInputs.expired_time) {
       localInputs.expired_time = 0;
@@ -260,6 +262,16 @@ const EditRedemptionModal = (props) => {
                         style={{ width: '100%' }}
                         showClear
                       />
+                    </Col>
+                    <Col span={24}>
+                      <Form.Checkbox field='register_enabled' noLabel>
+                        {t('可用于注册')}
+                      </Form.Checkbox>
+                      <div className='mt-1 text-xs text-gray-500'>
+                        {t(
+                          '勾选后该兑换码才可用于注册；未勾选时只能走普通兑换流程。注册成功时会自动兑换额度。',
+                        )}
+                      </div>
                     </Col>
                   </Row>
                 </Card>

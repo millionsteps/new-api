@@ -118,6 +118,21 @@ export const getRedemptionsColumns = ({
       },
     },
     {
+      title: t('可用于注册'),
+      dataIndex: 'register_enabled',
+      render: (value) => {
+        return value ? (
+          <Tag color='green' shape='circle'>
+            {t('是')}
+          </Tag>
+        ) : (
+          <Tag color='grey' shape='circle'>
+            {t('否')}
+          </Tag>
+        );
+      },
+    },
+    {
       title: t('创建时间'),
       dataIndex: 'created_time',
       render: (text) => {

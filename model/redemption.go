@@ -14,18 +14,19 @@ import (
 var ErrRedeemFailed = errors.New("redeem.failed")
 
 type Redemption struct {
-	Id           int            `json:"id"`
-	UserId       int            `json:"user_id"`
-	Key          string         `json:"key" gorm:"type:char(32);uniqueIndex"`
-	Status       int            `json:"status" gorm:"default:1"`
-	Name         string         `json:"name" gorm:"index"`
-	Quota        int            `json:"quota" gorm:"default:100"`
-	CreatedTime  int64          `json:"created_time" gorm:"bigint"`
-	RedeemedTime int64          `json:"redeemed_time" gorm:"bigint"`
-	Count        int            `json:"count" gorm:"-:all"`
-	UsedUserId   int            `json:"used_user_id"`
-	DeletedAt    gorm.DeletedAt `gorm:"index"`
-	ExpiredTime  int64          `json:"expired_time" gorm:"bigint"`
+	Id              int            `json:"id"`
+	UserId          int            `json:"user_id"`
+	Key             string         `json:"key" gorm:"type:char(32);uniqueIndex"`
+	Status          int            `json:"status" gorm:"default:1"`
+	Name            string         `json:"name" gorm:"index"`
+	Quota           int            `json:"quota" gorm:"default:100"`
+	RegisterEnabled bool           `json:"register_enabled" gorm:"default:false"`
+	CreatedTime     int64          `json:"created_time" gorm:"bigint"`
+	RedeemedTime    int64          `json:"redeemed_time" gorm:"bigint"`
+	Count           int            `json:"count" gorm:"-:all"`
+	UsedUserId      int            `json:"used_user_id"`
+	DeletedAt       gorm.DeletedAt `gorm:"index"`
+	ExpiredTime     int64          `json:"expired_time" gorm:"bigint"`
 }
 
 func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
@@ -104,7 +105,7 @@ func GetRedemptionById(id int) (*Redemption, error) {
 	return &redemption, err
 }
 
-func redeemWithTx(tx *gorm.DB, key string, userId int) (*Redemption, error) {
+func redeemWithTx(tx *gorm.DB, key string, userId int, requireRegisterEnabled bool) (*Redemption, error) {
 	if key == "" {
 		return nil, errors.New("未提供兑换码")
 	}
@@ -130,6 +131,10 @@ func redeemWithTx(tx *gorm.DB, key string, userId int) (*Redemption, error) {
 		return nil, errors.New("该兑换码已过期")
 	}
 
+	if requireRegisterEnabled && !redemption.RegisterEnabled {
+		return nil, errors.New("该兑换码不可用于注册")
+	}
+
 	err = tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
 	if err != nil {
 		return nil, err
@@ -149,7 +154,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 	var redemption *Redemption
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		var txErr error
-		redemption, txErr = redeemWithTx(tx, key, userId)
+		redemption, txErr = redeemWithTx(tx, key, userId, false)
 		return txErr
 	})
 	if err != nil {
@@ -162,7 +167,15 @@ func Redeem(key string, userId int) (quota int, err error) {
 }
 
 func RedeemWithTx(tx *gorm.DB, key string, userId int) (quota int, err error) {
-	redemption, err := redeemWithTx(tx, key, userId)
+	redemption, err := redeemWithTx(tx, key, userId, false)
+	if err != nil {
+		return 0, err
+	}
+	return redemption.Quota, nil
+}
+
+func RedeemWithRegisterTx(tx *gorm.DB, key string, userId int) (quota int, err error) {
+	redemption, err := redeemWithTx(tx, key, userId, true)
 	if err != nil {
 		return 0, err
 	}
@@ -178,7 +191,7 @@ func (redemption *Redemption) SelectUpdate() error {
 }
 
 func (redemption *Redemption) Update() error {
-	return DB.Model(redemption).Select("name", "status", "quota", "redeemed_time", "expired_time").Updates(redemption).Error
+	return DB.Model(redemption).Select("name", "status", "quota", "register_enabled", "redeemed_time", "expired_time").Updates(redemption).Error
 }
 
 func (redemption *Redemption) Delete() error {

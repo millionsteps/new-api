@@ -218,7 +218,7 @@ func Register(c *gin.Context) {
 				}
 			}
 			if common.RegisterWithRedemptionCodeEnabled {
-				quota, redeemErr := model.RedeemWithTx(tx, user.RedemptionCode, cleanUser.Id)
+				quota, redeemErr := model.RedeemWithRegisterTx(tx, user.RedemptionCode, cleanUser.Id)
 				if redeemErr != nil {
 					return redeemErr
 				}

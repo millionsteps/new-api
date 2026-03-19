@@ -1,0 +1,20 @@
+FROM debian:bookworm-slim
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG ALL_PROXY
+ARG NO_PROXY
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    ALL_PROXY=${ALL_PROXY} \
+    NO_PROXY=${NO_PROXY}
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata libasan8 wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && update-ca-certificates
+
+COPY out/new-api /new-api
+EXPOSE 3000
+WORKDIR /data
+ENTRYPOINT ["/new-api"]

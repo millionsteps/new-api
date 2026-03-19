@@ -640,7 +640,9 @@ const RegisterForm = () => {
                     name='redemption_code'
                     onChange={(value) => handleChange('redemption_code', value)}
                     prefix={<IconKey />}
-                    extraText={t('将复用兑换码表作为激活码校验，注册成功时自动消费')}
+                    extraText={t(
+                      '请使用后台已勾选“可用于注册”的邀请码，注册成功时会自动兑换额度并消费该兑换码',
+                    )}
                   />
                 )}
 
