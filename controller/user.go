@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type LoginRequest struct {
@@ -157,6 +158,14 @@ func Register(c *gin.Context) {
 			return
 		}
 	}
+	if user.RedemptionCode != "" && !common.RegisterWithRedemptionCodeEnabled {
+		common.ApiErrorI18n(c, i18n.MsgUserRegisterRedemptionDisabled)
+		return
+	}
+	if common.RegisterWithRedemptionCodeEnabled && user.RedemptionCode == "" {
+		common.ApiErrorI18n(c, i18n.MsgUserRegisterRedemptionRequired)
+		return
+	}
 	exist, err := model.CheckUserExistOrDeleted(user.Username, user.Email)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
@@ -178,6 +187,62 @@ func Register(c *gin.Context) {
 	}
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
+	}
+	if common.RegisterEnabled {
+		redemptionQuota := 0
+		txErr := model.DB.Transaction(func(tx *gorm.DB) error {
+			if err := cleanUser.InsertWithTx(tx, inviterId); err != nil {
+				return err
+			}
+			if constant.GenerateDefaultToken {
+				key, keyErr := common.GenerateKey()
+				if keyErr != nil {
+					return keyErr
+				}
+				token := model.Token{
+					UserId:             cleanUser.Id,
+					Name:               cleanUser.Username + " initial token",
+					Key:                key,
+					CreatedTime:        common.GetTimestamp(),
+					AccessedTime:       common.GetTimestamp(),
+					ExpiredTime:        -1,
+					RemainQuota:        500000,
+					UnlimitedQuota:     true,
+					ModelLimitsEnabled: false,
+				}
+				if setting.DefaultUseAutoGroup {
+					token.Group = "auto"
+				}
+				if err := tx.Create(&token).Error; err != nil {
+					return err
+				}
+			}
+			if common.RegisterWithRedemptionCodeEnabled {
+				quota, redeemErr := model.RedeemWithTx(tx, user.RedemptionCode, cleanUser.Id)
+				if redeemErr != nil {
+					return redeemErr
+				}
+				redemptionQuota = quota
+			}
+			return nil
+		})
+		if txErr != nil {
+			common.ApiError(c, txErr)
+			return
+		}
+		cleanUser.FinalizeOAuthUserCreation(inviterId)
+		if common.RegisterWithRedemptionCodeEnabled {
+			if redemptionQuota > 0 {
+				model.RecordLog(cleanUser.Id, model.LogTypeTopup, fmt.Sprintf("registered with redemption code, quota %s", logger.LogQuota(redemptionQuota)))
+			} else {
+				model.RecordLog(cleanUser.Id, model.LogTypeSystem, "registered with redemption code")
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+		})
+		return
 	}
 	if err := cleanUser.Insert(inviterId); err != nil {
 		common.ApiError(c, err)

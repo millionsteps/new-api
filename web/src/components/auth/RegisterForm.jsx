@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   API,
   getLogo,
@@ -67,6 +67,7 @@ import { SiDiscord } from 'react-icons/si';
 
 const RegisterForm = () => {
   let navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const githubButtonTextKeyByState = {
     idle: '使用 GitHub 继续',
@@ -79,6 +80,7 @@ const RegisterForm = () => {
     password2: '',
     email: '',
     verification_code: '',
+    redemption_code: '',
     wechat_verification_code: '',
   });
   const { username, password, password2 } = inputs;
@@ -131,6 +133,10 @@ const RegisterForm = () => {
   }, [statusState?.status]);
   const hasCustomOAuthProviders =
     (status.custom_oauth_providers || []).length > 0;
+  const requireRedemptionCode = Boolean(status.register_with_redemption_code);
+  const isRedemptionRegisterPage =
+    location.pathname === '/register/redemption';
+  const forceInviteRegister = isRedemptionRegisterPage;
   const hasOAuthRegisterOptions = Boolean(
     status.github_oauth ||
       status.discord_oauth ||
@@ -154,6 +160,21 @@ const RegisterForm = () => {
     setHasUserAgreement(status?.user_agreement_enabled || false);
     setHasPrivacyPolicy(status?.privacy_policy_enabled || false);
   }, [status]);
+
+  useEffect(() => {
+    if (isRedemptionRegisterPage && !requireRedemptionCode) {
+      navigate('/register', { replace: true });
+      return;
+    }
+    if (forceInviteRegister) {
+      setShowEmailRegister(true);
+    }
+  }, [
+    forceInviteRegister,
+    isRedemptionRegisterPage,
+    navigate,
+    requireRedemptionCode,
+  ]);
 
   useEffect(() => {
     let countdownInterval = null;
@@ -218,6 +239,10 @@ const RegisterForm = () => {
   async function handleSubmit(e) {
     if (password.length < 8) {
       showInfo('密码长度不得小于 8 位！');
+      return;
+    }
+    if (requireRedemptionCode && !inputs.redemption_code) {
+      showInfo(t('请输入兑换码！'));
       return;
     }
     if (password !== password2) {
@@ -572,6 +597,11 @@ const RegisterForm = () => {
               </Title>
             </div>
             <div className='px-2 py-8'>
+              {forceInviteRegister && (
+                <div className='mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700'>
+                  {t('当前为邀请码注册页面，请先填写有效邀请码后再完成注册。')}
+                </div>
+              )}
               <Form className='space-y-3'>
                 <Form.Input
                   field='username'
@@ -601,6 +631,18 @@ const RegisterForm = () => {
                   onChange={(value) => handleChange('password2', value)}
                   prefix={<IconLock />}
                 />
+
+                {requireRedemptionCode && (
+                  <Form.Input
+                    field='redemption_code'
+                    label={t('邀请码')}
+                    placeholder={t('请输入邀请码')}
+                    name='redemption_code'
+                    onChange={(value) => handleChange('redemption_code', value)}
+                    prefix={<IconKey />}
+                    extraText={t('将复用兑换码表作为激活码校验，注册成功时自动消费')}
+                  />
+                )}
 
                 {showEmailVerification && (
                   <>
@@ -692,7 +734,7 @@ const RegisterForm = () => {
                 </div>
               </Form>
 
-              {hasOAuthRegisterOptions && (
+              {!forceInviteRegister && hasOAuthRegisterOptions && (
                 <>
                   <Divider margin='12px' align='center'>
                     {t('或')}
@@ -781,7 +823,8 @@ const RegisterForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
-        {showEmailRegister ||
+        {forceInviteRegister ||
+        showEmailRegister ||
         !hasOAuthRegisterOptions
           ? renderEmailRegisterForm()
           : renderOAuthOptions()}

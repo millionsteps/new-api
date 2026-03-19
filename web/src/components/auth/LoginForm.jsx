@@ -133,6 +133,12 @@ const LoginForm = () => {
   }, [statusState?.status]);
   const hasCustomOAuthProviders =
     (status.custom_oauth_providers || []).length > 0;
+  const redemptionRegisterEnabled = Boolean(
+    status.register_with_redemption_code,
+  );
+  const registerPath = redemptionRegisterEnabled
+    ? '/register/redemption'
+    : '/register';
   const hasOAuthLoginOptions = Boolean(
     status.github_oauth ||
       status.discord_oauth ||
@@ -171,6 +177,26 @@ const LoginForm = () => {
       showError(t('未登录或登录已过期，请重新登录'));
     }
   }, []);
+
+  useEffect(() => {
+    if (!redemptionRegisterEnabled || status.self_use_mode_enabled) {
+      return;
+    }
+    if (searchParams.get('expired')) {
+      return;
+    }
+    const redirectFlag = 'invite-register-first-redirected';
+    if (sessionStorage.getItem(redirectFlag) === '1') {
+      return;
+    }
+    sessionStorage.setItem(redirectFlag, '1');
+    navigate('/register/redemption', { replace: true });
+  }, [
+    navigate,
+    redemptionRegisterEnabled,
+    searchParams,
+    status.self_use_mode_enabled,
+  ]);
 
   const onWeChatLoginClicked = () => {
     if ((hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms) {
@@ -701,7 +727,7 @@ const LoginForm = () => {
                   <Text>
                     {t('没有账户？')}{' '}
                     <Link
-                      to='/register'
+                      to={registerPath}
                       className='text-blue-600 hover:text-blue-800 font-medium'
                     >
                       {t('注册')}
@@ -854,7 +880,7 @@ const LoginForm = () => {
                   <Text>
                     {t('没有账户？')}{' '}
                     <Link
-                      to='/register'
+                      to={registerPath}
                       className='text-blue-600 hover:text-blue-800 font-medium'
                     >
                       {t('注册')}
