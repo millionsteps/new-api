@@ -348,13 +348,11 @@ const RegisterForm = () => {
   async function handleSubmit(e) {
     if (isPendingOAuthRedemption) {
       if (!inputs.redemption_code) {
-        showInfo('Please enter a redemption code.');
+        showInfo(t('请输入兑换码！'));
         return;
       }
       if (turnstileEnabled && turnstileToken === '') {
-        showInfo(
-          'Please try again in a moment. Turnstile is still verifying the current environment.',
-        );
+        showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
         return;
       }
       setRegisterLoading(true);
@@ -369,13 +367,13 @@ const RegisterForm = () => {
           localStorage.setItem('user', JSON.stringify(data));
           setUserData(data);
           updateAPI();
-          showSuccess('Registration completed and you are now signed in.');
+          showSuccess(t('注册成功，已完成登录！'));
           navigate('/console/token');
         } else {
           showError(message);
         }
       } catch (error) {
-        showError('Registration failed. Please try again.');
+        showError(t('注册失败，请重试'));
       } finally {
         setRegisterLoading(false);
       }
@@ -383,22 +381,20 @@ const RegisterForm = () => {
     }
 
     if (password.length < 8) {
-      showInfo('Password must be at least 8 characters long.');
+      showInfo(t('密码长度不得小于 8 位！'));
       return;
     }
     if (requireRedemptionCode && !inputs.redemption_code) {
-      showInfo('Please enter a redemption code.');
+      showInfo(t('请输入兑换码！'));
       return;
     }
     if (password !== password2) {
-      showInfo('The two passwords do not match.');
+      showInfo(t('两次输入的密码不一致'));
       return;
     }
     if (username && password) {
       if (turnstileEnabled && turnstileToken === '') {
-        showInfo(
-          'Please try again in a moment. Turnstile is still verifying the current environment.',
-        );
+        showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
         return;
       }
       setRegisterLoading(true);
@@ -414,12 +410,12 @@ const RegisterForm = () => {
         const { success, message } = res.data;
         if (success) {
           navigate('/login');
-          showSuccess('Registration succeeded.');
+          showSuccess(t('注册成功！'));
         } else {
           showError(message);
         }
       } catch (error) {
-        showError('Registration failed. Please try again.');
+        showError(t('注册失败，请重试'));
       } finally {
         setRegisterLoading(false);
       }
@@ -807,9 +803,6 @@ const RegisterForm = () => {
                     name='redemption_code'
                     onChange={(value) => handleChange('redemption_code', value)}
                     prefix={<IconKey />}
-                    extraText={t(
-                      '请使用后台已勾选“可用于注册”的兑换码，注册成功时会自动兑换额度并消费该兑换码',
-                    )}
                   />
                 )}
 

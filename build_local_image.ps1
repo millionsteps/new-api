@@ -4,6 +4,13 @@ param(
   [switch]$AlsoTagLatest,
   [switch]$Push,
   [switch]$PushLatest,
+  [switch]$SkipTagLatest,
+  [switch]$SkipPush,
+  [switch]$SkipPushLatest,
+  [switch]$SkipGitSync,
+  [string]$GitRemote = "fork",
+  [string]$GitBranch = "",
+  [string]$CommitMessage = "",
   [string]$HostProxy = "http://127.0.0.1:7897",
   [string]$HostAllProxy = "socks5://127.0.0.1:7897",
   [string]$HostNoProxy = "localhost,127.0.0.1,host.docker.internal",
@@ -21,14 +28,140 @@ if ([string]::IsNullOrWhiteSpace($repoRoot)) {
 
 Set-Location $repoRoot
 
-$commit = (git -C $repoRoot rev-parse --short=8 HEAD).Trim()
-if ([string]::IsNullOrWhiteSpace($Tag)) {
-  $Tag = "{0}-{1}" -f (Get-Date -Format "yyyyMMdd"), $commit
+$effectiveTagLatest = -not $SkipTagLatest
+$effectivePush = -not $SkipPush
+$effectivePushLatest = -not $SkipPushLatest
+
+if (-not $effectivePush) {
+  $effectivePushLatest = $false
+}
+
+if (-not $effectiveTagLatest) {
+  $effectivePushLatest = $false
 }
 
 $imageRef = "$Image`:$Tag"
 $logDir = Join-Path $repoRoot "logs"
 New-Item -ItemType Directory -Force $logDir | Out-Null
+
+function Get-FilteredUntrackedFiles {
+  $excludePaths = @(
+    "CHILD_AGENTS.md",
+    "logs",
+    "out",
+    "web/dist"
+  )
+
+  $untracked = git ls-files --others --exclude-standard
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to list untracked files."
+  }
+
+  $result = @()
+  foreach ($file in $untracked) {
+    if ([string]::IsNullOrWhiteSpace($file)) {
+      continue
+    }
+
+    $normalized = $file.Replace('\', '/')
+    $excluded = $false
+    foreach ($excludePath in $excludePaths) {
+      $normalizedExclude = $excludePath.Replace('\', '/').TrimEnd('/')
+      if ($normalized -eq $normalizedExclude -or $normalized.StartsWith("$normalizedExclude/")) {
+        $excluded = $true
+        break
+      }
+    }
+
+    if (-not $excluded) {
+      $result += $file
+    }
+  }
+
+  return $result
+}
+
+function Invoke-GitPushWithProxy {
+  param(
+    [string]$RemoteName,
+    [string]$BranchName
+  )
+
+  $env:HTTP_PROXY = $HostProxy
+  $env:HTTPS_PROXY = $HostProxy
+  $env:ALL_PROXY = $HostAllProxy
+  $env:NO_PROXY = $HostNoProxy
+  $env:http_proxy = $HostProxy
+  $env:https_proxy = $HostProxy
+  $env:all_proxy = $HostAllProxy
+  $env:no_proxy = $HostNoProxy
+
+  Write-Host ""
+  Write-Host "==> Sync git branch to remote" -ForegroundColor Cyan
+  Write-Host "INFO : git push proxy HTTP/HTTPS=$HostProxy ALL_PROXY=$HostAllProxy NO_PROXY=$HostNoProxy" -ForegroundColor DarkYellow
+  Write-Host "CMD  : git push $RemoteName $BranchName" -ForegroundColor DarkCyan
+  git push $RemoteName $BranchName
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to push branch $BranchName to remote $RemoteName."
+  }
+}
+
+function Invoke-GitSyncBeforeBuild {
+  param(
+    [string]$RemoteName,
+    [string]$BranchName,
+    [string]$Message
+  )
+
+  $effectiveBranch = $BranchName
+  if ([string]::IsNullOrWhiteSpace($effectiveBranch)) {
+    $effectiveBranch = (git branch --show-current).Trim()
+  }
+  if ([string]::IsNullOrWhiteSpace($effectiveBranch)) {
+    throw "Failed to determine current git branch."
+  }
+
+  Write-Host ""
+  Write-Host "==> Sync git changes before build" -ForegroundColor Cyan
+  Write-Host "Remote : $RemoteName"
+  Write-Host "Branch : $effectiveBranch"
+
+  Write-Host "CMD  : git add -u" -ForegroundColor DarkCyan
+  git add -u
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to stage tracked changes."
+  }
+
+  $untrackedFiles = @(Get-FilteredUntrackedFiles)
+  if ($untrackedFiles.Count -gt 0) {
+    Write-Host ("INFO : staging {0} untracked file(s) excluding local-only paths" -f $untrackedFiles.Count) -ForegroundColor DarkYellow
+    git add -- $untrackedFiles
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to stage untracked files."
+    }
+  }
+
+  git diff --cached --quiet
+  if ($LASTEXITCODE -eq 1) {
+    $effectiveMessage = $Message
+    if ([string]::IsNullOrWhiteSpace($effectiveMessage)) {
+      $effectiveMessage = "chore: auto sync before image build {0}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+    }
+
+    Write-Host ("CMD  : git commit -m ""{0}""" -f $effectiveMessage) -ForegroundColor DarkCyan
+    git commit -m $effectiveMessage
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to create git commit."
+    }
+  } elseif ($LASTEXITCODE -ne 0) {
+    throw "Failed to inspect staged changes."
+  } else {
+    Write-Host "INFO : no staged code changes to commit, skip git commit." -ForegroundColor DarkYellow
+  }
+
+  Invoke-GitPushWithProxy -RemoteName $RemoteName -BranchName $effectiveBranch
+  return $effectiveBranch
+}
 
 function Invoke-DockerPushWithRetry {
   param(
@@ -70,6 +203,17 @@ function Invoke-DockerPushWithRetry {
   throw "Failed to push $ImageReference after $effectiveRetries attempts."
 }
 
+$effectiveGitBranch = $GitBranch
+if (-not $SkipGitSync) {
+  $effectiveGitBranch = Invoke-GitSyncBeforeBuild -RemoteName $GitRemote -BranchName $GitBranch -Message $CommitMessage
+}
+
+$commit = (git -C $repoRoot rev-parse --short=8 HEAD).Trim()
+if ([string]::IsNullOrWhiteSpace($Tag)) {
+  $Tag = "{0}-{1}" -f (Get-Date -Format "yyyyMMdd"), $commit
+}
+$imageRef = "$Image`:$Tag"
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Yellow
 Write-Host "new-api local image build" -ForegroundColor Yellow
@@ -77,14 +221,20 @@ Write-Host "========================================" -ForegroundColor Yellow
 Write-Host "Repo   : $repoRoot"
 Write-Host "Commit : $commit"
 Write-Host "Image  : $imageRef"
-Write-Host "Push   : $Push"
-Write-Host "Latest : $AlsoTagLatest"
-Write-Host "PushLatest: $PushLatest"
+Write-Host "Push   : $effectivePush"
+Write-Host "Latest : $effectiveTagLatest"
+Write-Host "PushLatest: $effectivePushLatest"
 Write-Host "HostProxy: $HostProxy"
 Write-Host "HostAllProxy: $HostAllProxy"
 Write-Host "HostNoProxy: $HostNoProxy"
 Write-Host "PushRetries: $PushRetries"
 Write-Host "PushDelay : $PushRetryDelaySeconds"
+Write-Host "GitSync: $(-not $SkipGitSync)"
+Write-Host "GitRemote: $GitRemote"
+Write-Host "GitBranch: $effectiveGitBranch"
+Write-Host "SkipPush : $SkipPush"
+Write-Host "SkipTagLatest : $SkipTagLatest"
+Write-Host "SkipPushLatest: $SkipPushLatest"
 Write-Host "Logs   : $logDir"
 Write-Host ""
 
@@ -124,7 +274,7 @@ $buildArgs = @(
   "-HostNoProxy", $HostNoProxy
 )
 
-if ($Push) {
+if ($effectivePush) {
   $buildArgs += "-Push"
 }
 $buildArgs += @("-PushRetries", "$PushRetries", "-PushRetryDelaySeconds", "$PushRetryDelaySeconds")
@@ -134,7 +284,7 @@ if ($LASTEXITCODE -ne 0) {
   throw "Image build failed."
 }
 
-if ($AlsoTagLatest) {
+if ($effectiveTagLatest) {
   Write-Host ""
   Write-Host "==> Tag latest" -ForegroundColor Cyan
   Write-Host "CMD  : docker tag $imageRef $Image`:latest" -ForegroundColor DarkCyan
@@ -144,8 +294,8 @@ if ($AlsoTagLatest) {
   }
 }
 
-if ($PushLatest) {
-  if (-not $AlsoTagLatest) {
+if ($effectivePushLatest) {
+  if (-not $effectiveTagLatest) {
     Write-Host ""
     Write-Host "==> Tag latest" -ForegroundColor Cyan
     Write-Host "CMD  : docker tag $imageRef $Image`:latest" -ForegroundColor DarkCyan
