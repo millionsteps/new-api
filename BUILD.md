@@ -15,6 +15,19 @@
 - [build_and_push_image.ps1](/D:/github/QuantumNous/new-api/build_and_push_image.ps1)
 - [Dockerfile.runtime](/D:/github/QuantumNous/new-api/Dockerfile.runtime)
 
+## 当前提交与镜像
+
+- 当前代码提交：`2182c2eb`
+- 当前版本镜像：`akon/new-api:20260320-2182c2eb`
+- 当前 `latest`：`akon/new-api:latest`
+- 已推送镜像摘要：`sha256:081272bce36b77fbc12b84c5aee0b966609f411ee3781e597aa8d0a5bf7e76dc`
+
+本次提交除了构建脚本与文档整理，还包含以下功能变更：
+
+- OAuth 新用户在开启“兑换码注册”时，不再直接登录，而是跳转到 `/register/redemption` 完成兑换码注册
+- 用于注册的兑换码会在注册成功时自动兑换额度
+- 删除用户时会同步清理 `user_oauth_bindings`，避免自定义 OAuth 账号再次授权时被旧绑定残留影响
+
 这套流程会先在宿主机编译前后端产物，再由 Docker 只负责最终运行镜像打包，稳定性更高，也更容易定位问题。
 
 ---
@@ -59,7 +72,7 @@ yyyyMMdd-<当前 commit 短 SHA>
 例如：
 
 ```text
-akon/new-api:20260320-c4a3abb3
+akon/new-api:20260320-2182c2eb
 ```
 
 ### 2. 构建并推送版本 tag
@@ -158,7 +171,7 @@ docker images akon/new-api
 检查某个具体 tag：
 
 ```powershell
-docker image inspect akon/new-api:20260320-c4a3abb3
+docker image inspect akon/new-api:20260320-2182c2eb
 ```
 
 检查 `latest` 是否已更新：
@@ -307,6 +320,19 @@ docker run --rm hello-world
 ## 文档变更记录
 
 ### v1.1.0 - 2026-03-20 00:00
+
+### v1.2.0 - 2026-03-20 01:30
+
+**变更原因：** 同步本次已提交并已推送的镜像版本，同时补充这版镜像包含的功能变更，方便按文档直接核对部署对象。
+
+**修改内容：**
+
+1. 将文档中的示例镜像 tag 更新为 `akon/new-api:20260320-2182c2eb`。
+2. 补充当前版本镜像 `akon/new-api:20260320-2182c2eb`、`akon/new-api:latest` 与镜像摘要 `sha256:081272bce36b77fbc12b84c5aee0b966609f411ee3781e597aa8d0a5bf7e76dc`。
+3. 记录本次镜像内实际包含的功能：
+   - OAuth 新用户在开启兑换码注册时跳转兑换码注册页
+   - 注册型兑换码在注册成功时自动兑换
+   - 删除用户时同步清理 `user_oauth_bindings`，支持自定义 OAuth 账号重新授权
 
 **变更原因：** 同步当前实际构建方式，补充本地构建、打 tag、推送远程镜像的最新用法。
 
