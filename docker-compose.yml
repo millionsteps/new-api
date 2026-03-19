@@ -39,6 +39,13 @@ services:
 #      - UMAMI_WEBSITE_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  # Umami 网站 ID (Umami Website ID)
 #      - UMAMI_SCRIPT_URL=https://analytics.umami.is/script.js  # Umami 脚本 URL，默认为官方地址 (Umami Script URL, defaults to official URL)
 
+    # 变更说明：
+    # 1. 新增 extra_hosts
+    # 2. 让容器内的 host.docker.internal 映射到宿主机网关
+    # 3. 用于访问部署在宿主机上的内网代理/转发服务，例如 http://host.docker.internal:18337
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     depends_on:
       - redis
       - postgres

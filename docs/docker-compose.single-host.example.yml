@@ -1,0 +1,65 @@
+version: '3.4'
+
+services:
+  new-api:
+    # 必改：替换成你实际推送到远程仓库的镜像标签
+    image: akon/new-api:20260317-0eee3411
+    container_name: new-api
+    restart: always
+    command: --log-dir /app/logs
+    ports:
+      - "3000:3000"
+    # 变更说明：
+    # 1. 新增 extra_hosts
+    # 2. 让容器内的 host.docker.internal 映射到宿主机网关
+    # 3. 用于访问部署在宿主机上的内网代理/转发服务
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/data
+      - ./logs:/app/logs
+    environment:
+      - SQL_DSN=postgresql://root:123456@postgres:5432/new-api
+      - REDIS_CONN_STRING=redis://redis
+      - TZ=Asia/Shanghai
+      - ERROR_LOG_ENABLED=true
+      - BATCH_UPDATE_ENABLED=true
+      # 已生成随机字符串，可按需替换
+      - SESSION_SECRET=486c58295beaac88d06a94b0688281a27906c341424f79a1e2ab68ac951ba601
+      # 已生成随机字符串，可按需替换
+      - CRYPTO_SECRET=d4a15d6962d1c0e9e424a2d862abcc20b9840a773d0c4d47ea759706977d4c55
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - new-api-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    restart: always
+    networks:
+      - new-api-network
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: new-api
+    volumes:
+      # 必改：映射到服务器本地目录，便于迁移和备份
+      - ./postgres:/var/lib/postgresql/data
+    networks:
+      - new-api-network
+
+networks:
+  new-api-network:
+    driver: bridge

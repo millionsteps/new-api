@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next';
 import {
   API,
   showError,
+  showInfo,
   showSuccess,
   updateAPI,
   setUserData,
@@ -53,6 +54,14 @@ const OAuth2Callback = (props) => {
       if (!success) {
         // 业务错误不重试，直接显示错误
         showError(message || t('授权失败'));
+        return;
+      }
+
+      if (data?.require_redemption_code) {
+        showInfo(t('已完成授权，请输入兑换码完成注册'));
+        navigate(data.register_path || '/register/redemption', {
+          replace: true,
+        });
         return;
       }
 

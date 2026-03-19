@@ -103,6 +103,9 @@ const RegisterForm = () => {
     useState(false);
   const [wechatCodeSubmitLoading, setWechatCodeSubmitLoading] = useState(false);
   const [customOAuthLoading, setCustomOAuthLoading] = useState({});
+  const [pendingOAuthRegistration, setPendingOAuthRegistration] =
+    useState(null);
+  const [pendingOAuthLoading, setPendingOAuthLoading] = useState(false);
   const [disableButton, setDisableButton] = useState(false);
   const [countdown, setCountdown] = useState(30);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
@@ -137,6 +140,7 @@ const RegisterForm = () => {
   const isRedemptionRegisterPage =
     location.pathname === '/register/redemption';
   const forceInviteRegister = isRedemptionRegisterPage;
+  const isPendingOAuthRedemption = Boolean(pendingOAuthRegistration?.pending);
   const hasOAuthRegisterOptions = Boolean(
     status.github_oauth ||
       status.discord_oauth ||
@@ -175,6 +179,31 @@ const RegisterForm = () => {
     navigate,
     requireRedemptionCode,
   ]);
+
+  useEffect(() => {
+    const loadPendingOAuthRegistration = async () => {
+      if (!isRedemptionRegisterPage) {
+        setPendingOAuthRegistration(null);
+        return;
+      }
+      setPendingOAuthLoading(true);
+      try {
+        const res = await API.get('/api/oauth/pending');
+        const { success, data } = res.data;
+        if (success && data?.pending) {
+          setPendingOAuthRegistration(data);
+        } else {
+          setPendingOAuthRegistration(null);
+        }
+      } catch (error) {
+        setPendingOAuthRegistration(null);
+      } finally {
+        setPendingOAuthLoading(false);
+      }
+    };
+
+    loadPendingOAuthRegistration();
+  }, [isRedemptionRegisterPage]);
 
   useEffect(() => {
     let countdownInterval = null;
@@ -236,7 +265,43 @@ const RegisterForm = () => {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   }
 
+  /*
   async function handleSubmit(e) {
+    if (isPendingOAuthRedemption) {
+      if (requireRedemptionCode && !inputs.redemption_code) {
+        showInfo('请输入兑换码！');
+        /*
+        showInfo(t('璇疯緭鍏ュ厬鎹㈢爜锛?));
+        return;
+      }
+      if (turnstileEnabled && turnstileToken === '') {
+        showInfo('璇风◢鍚庡嚑绉掗噸璇曪紝Turnstile 姝ｅ湪妫€鏌ョ敤鎴风幆澧冿紒');
+        return;
+      }
+      setRegisterLoading(true);
+      try {
+        const res = await API.post(
+          `/api/oauth/register?turnstile=${turnstileToken}`,
+          { redemption_code: inputs.redemption_code },
+        );
+        const { success, message, data } = res.data;
+        if (success) {
+          userDispatch({ type: 'login', payload: data });
+          localStorage.setItem('user', JSON.stringify(data));
+          setUserData(data);
+          updateAPI();
+          showSuccess('注册成功，已完成登录！');
+          navigate('/console/token');
+        } else {
+          showError(message);
+        }
+      } catch (error) {
+        showError('注册失败，请重试');
+      } finally {
+        setRegisterLoading(false);
+      }
+      return;
+    }
     if (password.length < 8) {
       showInfo('密码长度不得小于 8 位！');
       return;
@@ -273,6 +338,88 @@ const RegisterForm = () => {
         }
       } catch (error) {
         showError('注册失败，请重试');
+      } finally {
+        setRegisterLoading(false);
+      }
+    }
+  }
+  */
+
+  async function handleSubmit(e) {
+    if (isPendingOAuthRedemption) {
+      if (!inputs.redemption_code) {
+        showInfo('Please enter a redemption code.');
+        return;
+      }
+      if (turnstileEnabled && turnstileToken === '') {
+        showInfo(
+          'Please try again in a moment. Turnstile is still verifying the current environment.',
+        );
+        return;
+      }
+      setRegisterLoading(true);
+      try {
+        const res = await API.post(
+          `/api/oauth/register?turnstile=${turnstileToken}`,
+          { redemption_code: inputs.redemption_code },
+        );
+        const { success, message, data } = res.data;
+        if (success) {
+          userDispatch({ type: 'login', payload: data });
+          localStorage.setItem('user', JSON.stringify(data));
+          setUserData(data);
+          updateAPI();
+          showSuccess('Registration completed and you are now signed in.');
+          navigate('/console/token');
+        } else {
+          showError(message);
+        }
+      } catch (error) {
+        showError('Registration failed. Please try again.');
+      } finally {
+        setRegisterLoading(false);
+      }
+      return;
+    }
+
+    if (password.length < 8) {
+      showInfo('Password must be at least 8 characters long.');
+      return;
+    }
+    if (requireRedemptionCode && !inputs.redemption_code) {
+      showInfo('Please enter a redemption code.');
+      return;
+    }
+    if (password !== password2) {
+      showInfo('The two passwords do not match.');
+      return;
+    }
+    if (username && password) {
+      if (turnstileEnabled && turnstileToken === '') {
+        showInfo(
+          'Please try again in a moment. Turnstile is still verifying the current environment.',
+        );
+        return;
+      }
+      setRegisterLoading(true);
+      try {
+        if (!affCode) {
+          affCode = localStorage.getItem('aff');
+        }
+        inputs.aff_code = affCode;
+        const res = await API.post(
+          `/api/user/register?turnstile=${turnstileToken}`,
+          inputs,
+        );
+        const { success, message } = res.data;
+        if (success) {
+          navigate('/login');
+          showSuccess('Registration succeeded.');
+        } else {
+          showError(message);
+        }
+      } catch (error) {
+        showError('Registration failed. Please try again.');
       } finally {
         setRegisterLoading(false);
       }
@@ -597,12 +744,30 @@ const RegisterForm = () => {
               </Title>
             </div>
             <div className='px-2 py-8'>
-              {forceInviteRegister && (
+              {pendingOAuthLoading && (
+                <div className='mb-4 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-700'>
+                  {t('正在检查 OAuth 注册状态，请稍候...')}
+                </div>
+              )}
+              {isPendingOAuthRedemption && (
+                <div className='mb-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700'>
+                  {t(
+                    '已完成 {{provider}} 授权，请输入可用于注册的兑换码完成注册并自动兑换额度。',
+                    {
+                      provider:
+                        pendingOAuthRegistration?.providerName || t('OAuth'),
+                    },
+                  )}
+                </div>
+              )}
+              {forceInviteRegister && !isPendingOAuthRedemption && (
                 <div className='mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700'>
                   {t('当前为邀请码注册页面，请先填写有效邀请码后再完成注册。')}
                 </div>
               )}
               <Form className='space-y-3'>
+                {!isPendingOAuthRedemption && (
+                  <>
                 <Form.Input
                   field='username'
                   label={t('用户名')}
@@ -631,22 +796,24 @@ const RegisterForm = () => {
                   onChange={(value) => handleChange('password2', value)}
                   prefix={<IconLock />}
                 />
+                  </>
+                )}
 
                 {requireRedemptionCode && (
                   <Form.Input
                     field='redemption_code'
-                    label={t('邀请码')}
-                    placeholder={t('请输入邀请码')}
+                    label={t('兑换码')}
+                    placeholder={t('请输入兑换码')}
                     name='redemption_code'
                     onChange={(value) => handleChange('redemption_code', value)}
                     prefix={<IconKey />}
                     extraText={t(
-                      '请使用后台已勾选“可用于注册”的邀请码，注册成功时会自动兑换额度并消费该兑换码',
+                      '请使用后台已勾选“可用于注册”的兑换码，注册成功时会自动兑换额度并消费该兑换码',
                     )}
                   />
                 )}
 
-                {showEmailVerification && (
+                {showEmailVerification && !isPendingOAuthRedemption && (
                   <>
                     <Form.Input
                       field='email'
@@ -731,7 +898,7 @@ const RegisterForm = () => {
                       (hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms
                     }
                   >
-                    {t('注册')}
+                    {isPendingOAuthRedemption ? t('完成注册') : t('注册')}
                   </Button>
                 </div>
               </Form>

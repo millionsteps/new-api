@@ -2,18 +2,20 @@
 
 ## 概述
 
-这份文档基于当前仓库的实际构建结果整理，目标是解决以下几个常见问题：
+这份文档基于当前仓库脚本的实际行为整理，目标是解决以下几个常见问题：
 
-- Docker `buildx` 多阶段构建过程中，前端 `vite build` 阶段偶发 `rpc EOF`
-- Go 依赖下载阶段访问 `proxy.golang.org` 不稳定
-- 每次发布都要手工敲很多命令
+- Docker 多阶段构建里，前端 `vite build` 偶发卡住或报 `rpc EOF`
+- Go 依赖下载访问官方源不稳定
+- 构建、打 tag、推送、远程部署命令分散，不方便重复执行
 
-当前推荐方案不是直接依赖原始多阶段 `Dockerfile` 一把构建，而是使用仓库内的分步构建脚本：
+当前推荐方案不是直接依赖原始多阶段 `Dockerfile` 一把构建，而是使用仓库内的分步脚本：
 
+- [build_local_image.ps1](/D:/github/QuantumNous/new-api/build_local_image.ps1)
+- [build_local_image.bat](/D:/github/QuantumNous/new-api/build_local_image.bat)
 - [build_and_push_image.ps1](/D:/github/QuantumNous/new-api/build_and_push_image.ps1)
 - [Dockerfile.runtime](/D:/github/QuantumNous/new-api/Dockerfile.runtime)
 
-这套流程会先单独构建前端产物和后端二进制，再打运行镜像，稳定性更高。
+这套流程会先在宿主机编译前后端产物，再由 Docker 只负责最终运行镜像打包，稳定性更高，也更容易定位问题。
 
 ---
 
@@ -21,61 +23,100 @@
 
 - 已安装并启动 Docker Desktop
 - 宿主机已安装 Go，且 `go version` 可用
+- 宿主机已安装 Bun，或至少已安装 `pnpm` / `npm`
 - 可访问宿主机代理端口 `7897`
-- 已登录 Docker Hub：`docker login`
+- 如需推送远程镜像，需先执行 `docker login`
 
 说明：
 
-- 当前脚本不要求宿主机安装 Bun
-- 前端构建会在 Bun 容器中完成
+- 当前脚本会优先使用本机 Bun 构建前端
+- 如果 `bun` 不在 PATH 中，脚本也会尝试自动查找常见安装路径
+- Docker 只用于最终运行镜像打包，不再用于前端依赖安装和前端编译
 
 ---
 
-## 推荐构建方式
+## 推荐用法
 
-在仓库根目录执行：
+### 1. 只构建本地镜像
 
 ```powershell
 Set-Location D:\github\QuantumNous\new-api
-powershell -ExecutionPolicy Bypass -File .\build_and_push_image.ps1
+.\build_local_image.ps1
 ```
 
-默认会构建本地镜像：
+或直接双击：
 
 ```text
-akon/new-api:20260319-32ece0ee
+build_local_image.bat
 ```
 
-如果你要指定其他 tag：
+默认 tag 规则为：
+
+```text
+yyyyMMdd-<当前 commit 短 SHA>
+```
+
+例如：
+
+```text
+akon/new-api:20260320-c4a3abb3
+```
+
+### 2. 构建并推送版本 tag
 
 ```powershell
 Set-Location D:\github\QuantumNous\new-api
-powershell -ExecutionPolicy Bypass -File .\build_and_push_image.ps1 -Tag 20260319-mytag
+.\build_local_image.ps1 -Push
 ```
 
-如果你要构建后直接推送：
+### 3. 构建后额外打上 `latest`
 
 ```powershell
 Set-Location D:\github\QuantumNous\new-api
-powershell -ExecutionPolicy Bypass -File .\build_and_push_image.ps1 -Push
+.\build_local_image.ps1 -AlsoTagLatest
+```
+
+### 4. 构建、推送版本 tag，并同步推送 `latest`
+
+```powershell
+Set-Location D:\github\QuantumNous\new-api
+.\build_local_image.ps1 -Push -AlsoTagLatest -PushLatest
+```
+
+这是远程服务使用 `latest` 时最方便的一种方式。
+
+### 5. 指定自定义 tag
+
+```powershell
+Set-Location D:\github\QuantumNous\new-api
+.\build_local_image.ps1 -Tag 20260320-mybuild -Push
 ```
 
 ---
 
-## 脚本实际做了什么
+## 脚本实际流程
+
+`build_local_image.ps1` 的流程如下：
+
+1. 检查 Docker Desktop 是否就绪，未就绪时按重试次数循环等待
+2. 调用 [build_and_push_image.ps1](/D:/github/QuantumNous/new-api/build_and_push_image.ps1) 执行真正的构建
+3. 如带 `-Push`，推送版本 tag
+4. 如带 `-AlsoTagLatest`，补打 `latest`
+5. 如带 `-PushLatest`，推送 `latest`
 
 `build_and_push_image.ps1` 的流程如下：
 
-1. 使用 Bun 容器构建 `web/dist`
-2. 使用宿主机 Go 交叉编译 `linux/amd64` 二进制到 `out/new-api`
-3. 使用 [Dockerfile.runtime](/D:/github/QuantumNous/new-api/Dockerfile.runtime) 打包最终运行镜像
-4. 如果带 `-Push`，则推送镜像到 Docker Hub
+1. 在宿主机 `web` 目录执行前端构建
+2. 优先使用本机 Bun；如果不存在，再回退到 `pnpm` 或 `npm`
+3. 在宿主机使用 Go 交叉编译 `linux/amd64` 二进制到 `out/new-api`
+4. 使用 [Dockerfile.runtime](/D:/github/QuantumNous/new-api/Dockerfile.runtime) 打包最终运行镜像
+5. 如带 `-Push`，推送版本 tag 到 Docker Hub
 
-这样做的原因：
+这样做的好处：
 
-- 绕开 `buildx` 多阶段里最容易不稳定的前端构建阶段
-- Go 下载依赖时显式使用 `GOPROXY=https://goproxy.cn,direct`
-- 构建失败时可以明确定位是前端、Go 编译，还是镜像打包
+- 前端编译不再依赖 `docker run bun`
+- 可以直接看到本机 Bun、Go、Docker 各阶段日志
+- 构建失败时更容易定位是前端、Go 编译，还是镜像打包或镜像推送
 
 ---
 
@@ -83,20 +124,25 @@ powershell -ExecutionPolicy Bypass -File .\build_and_push_image.ps1 -Push
 
 脚本默认使用以下代理：
 
-- 容器内 HTTP/HTTPS：`http://host.docker.internal:7897`
-- 容器内 SOCKS：`socks5://host.docker.internal:7897`
-- 宿主机 Go：`http://127.0.0.1:7897`
+- 宿主机前端 / Go：`http://127.0.0.1:7897`
+- 宿主机 SOCKS：`socks5://127.0.0.1:7897`
+- `docker push` 阶段也会显式继承宿主机代理 `127.0.0.1:7897`
+- Docker 构建阶段 HTTP/HTTPS：`http://host.docker.internal:7897`
+- Docker 构建阶段 SOCKS：`socks5://host.docker.internal:7897`
+- Go 模块代理：`https://goproxy.cn,direct`
 
 如果你的代理地址不同，可以这样覆盖：
 
 ```powershell
 Set-Location D:\github\QuantumNous\new-api
 powershell -ExecutionPolicy Bypass -File .\build_and_push_image.ps1 `
-  -ContainerProxy http://host.docker.internal:7897 `
-  -ContainerAllProxy socks5://host.docker.internal:7897 `
+  -Tag 20260320-mybuild `
   -HostProxy http://127.0.0.1:7897 `
   -HostAllProxy socks5://127.0.0.1:7897 `
-  -GoProxy https://goproxy.cn,direct
+  -ContainerProxy http://host.docker.internal:7897 `
+  -ContainerAllProxy socks5://host.docker.internal:7897 `
+  -GoProxy https://goproxy.cn,direct `
+  -Push
 ```
 
 ---
@@ -109,41 +155,23 @@ powershell -ExecutionPolicy Bypass -File .\build_and_push_image.ps1 `
 docker images akon/new-api
 ```
 
-如果只想检查某个 tag：
+检查某个具体 tag：
 
 ```powershell
-docker images akon/new-api:20260319-32ece0ee
+docker image inspect akon/new-api:20260320-c4a3abb3
+```
+
+检查 `latest` 是否已更新：
+
+```powershell
+docker image inspect akon/new-api:latest
 ```
 
 ---
 
-## 发布建议
+## 远程 Compose 部署
 
-建议同时保留“版本 tag”和 `latest`。
-
-例如先推版本 tag：
-
-```powershell
-docker push akon/new-api:20260319-32ece0ee
-```
-
-再更新 `latest`：
-
-```powershell
-docker tag akon/new-api:20260319-32ece0ee akon/new-api:latest
-docker push akon/new-api:latest
-```
-
-这样做的好处：
-
-- 线上部署可以固定写 `latest`
-- 出问题时仍然可以回滚到某个历史版本 tag
-
----
-
-## 远程 Compose 更新
-
-远程 `docker-compose.yml` 建议写成：
+远程 `docker-compose.yml` 或 `compose.yaml` 建议使用：
 
 ```yaml
 services:
@@ -151,21 +179,21 @@ services:
     image: akon/new-api:latest
 ```
 
-发布新镜像后，在远程服务器部署目录执行：
+每次发布完成后，在远程服务器部署目录执行：
 
 ```bash
 docker compose pull new-api
 docker compose up -d --force-recreate new-api
 ```
 
-如果是老版 Compose：
+如果远程仍然使用老版命令：
 
 ```bash
 docker-compose pull new-api
 docker-compose up -d --force-recreate new-api
 ```
 
-检查当前运行镜像：
+检查当前实际运行的镜像：
 
 ```bash
 docker inspect new-api --format='{{.Config.Image}}'
@@ -185,59 +213,66 @@ docker compose logs -f --tail=200 new-api
 
 这通常只是警告，不是阻塞构建的根因。
 
-如果你看到日志停在：
+如果日志停在：
 
 ```text
 transforming...
 Browserslist: browsers data (caniuse-lite) is 10 months old
 ```
 
-真正的问题往往是后续的：
+更常见的真实问题往往是：
 
-- Docker Desktop / BuildKit `rpc EOF`
-- 网络抖动导致 tarball 或依赖下载失败
+- Docker Desktop / Docker Engine 短暂不稳定
+- 网络抖动导致依赖下载或镜像推送失败
+- Bun / npm 拉包阶段网络超时
 
-如果你只想更新 Browserslist 数据，可以在 `web` 目录执行：
-
-```powershell
-npx update-browserslist-db@latest
-```
-
-或：
+如果只想更新 Browserslist 数据，可以在 `web` 目录执行：
 
 ```powershell
 bunx update-browserslist-db@latest
 ```
 
----
+或：
 
-### 2. `go mod download` 访问 `proxy.golang.org` 失败
+```powershell
+npx update-browserslist-db@latest
+```
 
-当前推荐直接使用：
+### 2. `bun` 明明装了，但脚本提示找不到
+
+当前脚本会优先：
+
+1. 从 PATH 查找 `bun`
+2. 查找常见安装位置，例如 `C:\Users\admin\.bun\bin\bun.exe`
+
+如果仍找不到，先手动确认：
+
+```powershell
+C:\Users\admin\.bun\bin\bun.exe --version
+```
+
+### 3. `go mod download` 访问官方源失败
+
+当前脚本默认已使用：
 
 ```text
 GOPROXY=https://goproxy.cn,direct
 ```
 
-脚本已经内置了这个默认值。
+通常不需要额外修改。
 
----
+### 4. `docker push` 过程中出现 `EOF`
 
-### 3. `bun install` 报 tarball integrity check failed
+这通常更像是 Docker Desktop 到 Docker Hub 的网络链路或代理抖动，不是脚本参数错误。
 
-这是网络抖动或缓存损坏导致的常见问题。当前脚本已经做了两件事：
+优先检查：
 
-- 使用临时 Docker volume 存放 `node_modules`
-- 前端构建失败时自动重试一次
-
-如果仍然失败，优先检查：
-
+- Docker Desktop 是否正常
+- `docker login` 是否已登录
 - 代理是否可用
-- Docker Desktop CPU / 内存是否被打满
+- 当前网络是否能稳定访问 Docker Hub
 
----
-
-### 4. Docker API 返回 500
+### 5. Docker API 返回 500
 
 例如：
 
@@ -245,21 +280,39 @@ GOPROXY=https://goproxy.cn,direct
 request returned 500 Internal Server Error for API route ... /docker_engine/_ping
 ```
 
-通常说明 Docker Desktop 没完全起来，或者 Docker Engine 短暂异常。
+通常说明 Docker Desktop 还没完全启动，或者 Docker Engine 短暂异常。
 
 先执行：
 
 ```powershell
 docker version
 docker buildx ls
+docker run --rm hello-world
 ```
 
-确认 `desktop-linux` 或 `default` builder 处于 `running` 状态后再构建。
+确认 Docker 正常后再执行构建。
 
 ---
 
 ## 相关文件
 
-- 构建脚本：[build_and_push_image.ps1](/D:/github/QuantumNous/new-api/build_and_push_image.ps1)
+- 构建入口脚本：[build_local_image.ps1](/D:/github/QuantumNous/new-api/build_local_image.ps1)
+- 批处理入口：[build_local_image.bat](/D:/github/QuantumNous/new-api/build_local_image.bat)
+- 实际构建脚本：[build_and_push_image.ps1](/D:/github/QuantumNous/new-api/build_and_push_image.ps1)
 - 运行镜像 Dockerfile：[Dockerfile.runtime](/D:/github/QuantumNous/new-api/Dockerfile.runtime)
 - 原始多阶段 Dockerfile：[Dockerfile](/D:/github/QuantumNous/new-api/Dockerfile)
+
+---
+
+## 文档变更记录
+
+### v1.1.0 - 2026-03-20 00:00
+
+**变更原因：** 同步当前实际构建方式，补充本地构建、打 tag、推送远程镜像的最新用法。
+
+**修改内容：**
+
+1. 移除“前端使用 Bun 容器构建”的旧描述，改为“宿主机优先使用 Bun 构建前端”。
+2. 补充 `build_local_image.ps1` 的 `-Push`、`-AlsoTagLatest`、`-PushLatest` 用法。
+3. 将固定 tag 示例改为按日期和 commit 自动生成的实际规则。
+4. 补充远程 Compose 使用 `latest` 的部署建议。

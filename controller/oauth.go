@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -13,6 +14,20 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+const pendingOAuthRegistrationSessionKey = "pending_oauth_registration"
+
+type pendingOAuthRegistration struct {
+	Provider       string `json:"provider"`
+	ProviderUserID string `json:"provider_user_id"`
+	Username       string `json:"username,omitempty"`
+	DisplayName    string `json:"display_name,omitempty"`
+	Email          string `json:"email,omitempty"`
+}
+
+type OAuthRegisterRequest struct {
+	RedemptionCode string `json:"redemption_code"`
+}
 
 // providerParams returns map with Provider key for i18n templates
 func providerParams(name string) map[string]any {
@@ -104,7 +119,7 @@ func HandleOAuth(c *gin.Context) {
 	}
 
 	// 7. Find or create user
-	user, err := findOrCreateOAuthUser(c, provider, oauthUser, session)
+	user, exists, err := findExistingOAuthUser(provider, oauthUser)
 	if err != nil {
 		switch err.(type) {
 		case *OAuthUserDeletedError:
@@ -116,6 +131,34 @@ func HandleOAuth(c *gin.Context) {
 		}
 		return
 	}
+	if !exists {
+		if !common.RegisterEnabled {
+			common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
+			return
+		}
+		if common.RegisterWithRedemptionCodeEnabled {
+			if err := savePendingOAuthRegistration(session, providerName, oauthUser); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"message": "",
+				"data": gin.H{
+					"require_redemption_code": true,
+					"register_path":           "/register/redemption",
+					"provider":                providerName,
+				},
+			})
+			return
+		}
+
+		user, err = createOAuthUser(provider, oauthUser, session)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
 
 	// 8. Check user status
 	if user.Status != common.UserStatusEnabled {
@@ -124,6 +167,119 @@ func HandleOAuth(c *gin.Context) {
 	}
 
 	// 9. Setup login
+	setupLogin(user, c)
+}
+
+func GetPendingOAuthRegistration(c *gin.Context) {
+	session := sessions.Default(c)
+	pending, err := getPendingOAuthRegistration(session)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if pending == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data": gin.H{
+				"pending": false,
+			},
+		})
+		return
+	}
+
+	providerName := pending.Provider
+	if provider := oauth.GetProvider(pending.Provider); provider != nil {
+		providerName = provider.GetName()
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"pending":      true,
+			"provider":     pending.Provider,
+			"providerName": providerName,
+			"display_name": pending.DisplayName,
+			"email":        pending.Email,
+		},
+	})
+}
+
+func CompleteOAuthRegistration(c *gin.Context) {
+	if !common.RegisterEnabled {
+		common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
+		return
+	}
+	if !common.RegisterWithRedemptionCodeEnabled {
+		common.ApiErrorI18n(c, i18n.MsgUserRegisterRedemptionDisabled)
+		return
+	}
+
+	session := sessions.Default(c)
+	pending, err := getPendingOAuthRegistration(session)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if pending == nil {
+		common.ApiErrorMsg(c, "oauth registration session expired")
+		return
+	}
+
+	var request OAuthRegisterRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	if request.RedemptionCode == "" {
+		common.ApiErrorI18n(c, i18n.MsgUserRegisterRedemptionRequired)
+		return
+	}
+
+	provider := oauth.GetProvider(pending.Provider)
+	if provider == nil {
+		common.ApiErrorMsg(c, "oauth provider not found")
+		return
+	}
+
+	if provider.IsUserIDTaken(pending.ProviderUserID) {
+		user, _, findErr := findExistingOAuthUser(provider, &oauth.OAuthUser{
+			ProviderUserID: pending.ProviderUserID,
+		})
+		if findErr != nil {
+			common.ApiError(c, findErr)
+			return
+		}
+		if err := clearPendingOAuthRegistration(session); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		setupLogin(user, c)
+		return
+	}
+
+	oauthUser := &oauth.OAuthUser{
+		ProviderUserID: pending.ProviderUserID,
+		Username:       pending.Username,
+		DisplayName:    pending.DisplayName,
+		Email:          pending.Email,
+	}
+
+	user, err := createOAuthUserWithRedemption(provider, oauthUser, session, request.RedemptionCode)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if user.Status != common.UserStatusEnabled {
+		common.ApiErrorI18n(c, i18n.MsgOAuthUserBanned)
+		return
+	}
+	if err := clearPendingOAuthRegistration(session); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
 	setupLogin(user, c)
 }
 
@@ -193,21 +349,21 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, nil)
 }
 
-// findOrCreateOAuthUser finds existing user or creates new user
-func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, session sessions.Session) (*model.User, error) {
+// findExistingOAuthUser finds an existing user by OAuth binding.
+func findExistingOAuthUser(provider oauth.Provider, oauthUser *oauth.OAuthUser) (*model.User, bool, error) {
 	user := &model.User{}
 
 	// Check if user already exists with new ID
 	if provider.IsUserIDTaken(oauthUser.ProviderUserID) {
 		err := provider.FillUserByProviderID(user, oauthUser.ProviderUserID)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		// Check if user has been deleted
 		if user.Id == 0 {
-			return nil, &OAuthUserDeletedError{}
+			return nil, false, &OAuthUserDeletedError{}
 		}
-		return user, nil
+		return user, true, nil
 	}
 
 	// Try to find user with legacy ID (for GitHub migration from login to numeric ID)
@@ -215,7 +371,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		if provider.IsUserIDTaken(legacyID) {
 			err := provider.FillUserByProviderID(user, legacyID)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			if user.Id != 0 {
 				// Found user with legacy ID, migrate to new ID
@@ -225,15 +381,24 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 					common.SysError(fmt.Sprintf("[OAuth] Failed to migrate user %d: %s", user.Id, err.Error()))
 					// Continue with login even if migration fails
 				}
-				return user, nil
+				return user, true, nil
 			}
 		}
 	}
 
-	// User doesn't exist, create new user if registration is enabled
+	return nil, false, nil
+}
+
+func createOAuthUser(provider oauth.Provider, oauthUser *oauth.OAuthUser, session sessions.Session) (*model.User, error) {
+	return createOAuthUserWithRedemption(provider, oauthUser, session, "")
+}
+
+func createOAuthUserWithRedemption(provider oauth.Provider, oauthUser *oauth.OAuthUser, session sessions.Session, redemptionCode string) (*model.User, error) {
 	if !common.RegisterEnabled {
 		return nil, &OAuthRegistrationDisabledError{}
 	}
+
+	user := &model.User{}
 
 	// Set up new user
 	user.Username = provider.GetProviderPrefix() + strconv.Itoa(model.GetMaxUserId()+1)
@@ -285,6 +450,11 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 			if err := model.CreateUserOAuthBindingWithTx(tx, binding); err != nil {
 				return err
 			}
+			if redemptionCode != "" {
+				if _, err := model.RedeemWithRegisterTx(tx, redemptionCode, user.Id); err != nil {
+					return err
+				}
+			}
 
 			return nil
 		})
@@ -314,6 +484,11 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 			}).Error; err != nil {
 				return err
 			}
+			if redemptionCode != "" {
+				if _, err := model.RedeemWithRegisterTx(tx, redemptionCode, user.Id); err != nil {
+					return err
+				}
+			}
 
 			return nil
 		})
@@ -326,6 +501,43 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	}
 
 	return user, nil
+}
+
+func savePendingOAuthRegistration(session sessions.Session, provider string, oauthUser *oauth.OAuthUser) error {
+	payload := pendingOAuthRegistration{
+		Provider:       provider,
+		ProviderUserID: oauthUser.ProviderUserID,
+		Username:       oauthUser.Username,
+		DisplayName:    oauthUser.DisplayName,
+		Email:          oauthUser.Email,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	session.Set(pendingOAuthRegistrationSessionKey, string(raw))
+	return session.Save()
+}
+
+func getPendingOAuthRegistration(session sessions.Session) (*pendingOAuthRegistration, error) {
+	raw := session.Get(pendingOAuthRegistrationSessionKey)
+	if raw == nil {
+		return nil, nil
+	}
+	rawString, ok := raw.(string)
+	if !ok || rawString == "" {
+		return nil, nil
+	}
+	var pending pendingOAuthRegistration
+	if err := json.Unmarshal([]byte(rawString), &pending); err != nil {
+		return nil, err
+	}
+	return &pending, nil
+}
+
+func clearPendingOAuthRegistration(session sessions.Session) error {
+	session.Delete(pendingOAuthRegistrationSessionKey)
+	return session.Save()
 }
 
 // Error types for OAuth
