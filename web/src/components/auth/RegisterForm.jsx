@@ -136,6 +136,7 @@ const RegisterForm = () => {
   }, [statusState?.status]);
   const hasCustomOAuthProviders =
     (status.custom_oauth_providers || []).length > 0;
+  const passwordRegisterEnabled = status.password_register_enabled !== false;
   const requireRedemptionCode = Boolean(status.register_with_redemption_code);
   const isRedemptionRegisterPage =
     location.pathname === '/register/redemption';
@@ -150,6 +151,12 @@ const RegisterForm = () => {
       status.telegram_oauth ||
       hasCustomOAuthProviders,
   );
+  const shouldRenderEmailRegisterForm =
+    (forceInviteRegister &&
+      (pendingOAuthLoading ||
+        isPendingOAuthRedemption ||
+        passwordRegisterEnabled)) ||
+    (passwordRegisterEnabled && (showEmailRegister || !hasOAuthRegisterOptions));
 
   const [showEmailVerification, setShowEmailVerification] = useState(false);
 
@@ -688,6 +695,8 @@ const RegisterForm = () => {
                   </div>
                 )}
 
+                {passwordRegisterEnabled && (
+                  <>
                 <Divider margin='12px' align='center'>
                   {t('或')}
                 </Divider>
@@ -702,6 +711,8 @@ const RegisterForm = () => {
                 >
                   <span className='ml-3'>{t('使用 用户名 注册')}</span>
                 </Button>
+                  </>
+                )}
               </div>
 
               <div className='mt-6 text-center text-sm'>
@@ -985,9 +996,7 @@ const RegisterForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
-        {forceInviteRegister ||
-        showEmailRegister ||
-        !hasOAuthRegisterOptions
+        {shouldRenderEmailRegisterForm
           ? renderEmailRegisterForm()
           : renderOAuthOptions()}
         {renderWeChatLoginModal()}
