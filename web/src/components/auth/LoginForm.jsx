@@ -81,7 +81,7 @@ const LoginForm = () => {
     wechat_verification_code: '',
   });
   const { username, password } = inputs;
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const [submitted, setSubmitted] = useState(false);
   const [userState, userDispatch] = useContext(UserContext);
   const [statusState] = useContext(StatusContext);
@@ -133,6 +133,7 @@ const LoginForm = () => {
   }, [statusState?.status]);
   const hasCustomOAuthProviders =
     (status.custom_oauth_providers || []).length > 0;
+  const passwordRegisterEnabled = status.password_register_enabled !== false;
   const redemptionRegisterEnabled = Boolean(
     status.register_with_redemption_code,
   );
@@ -177,26 +178,6 @@ const LoginForm = () => {
       showError(t('未登录或登录已过期，请重新登录'));
     }
   }, []);
-
-  useEffect(() => {
-    if (!redemptionRegisterEnabled || status.self_use_mode_enabled) {
-      return;
-    }
-    if (searchParams.get('expired')) {
-      return;
-    }
-    const redirectFlag = 'invite-register-first-redirected';
-    if (sessionStorage.getItem(redirectFlag) === '1') {
-      return;
-    }
-    sessionStorage.setItem(redirectFlag, '1');
-    navigate('/register/redemption', { replace: true });
-  }, [
-    navigate,
-    redemptionRegisterEnabled,
-    searchParams,
-    status.self_use_mode_enabled,
-  ]);
 
   const onWeChatLoginClicked = () => {
     if ((hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms) {
@@ -722,7 +703,7 @@ const LoginForm = () => {
                 </div>
               )}
 
-              {!status.self_use_mode_enabled && (
+              {!status.self_use_mode_enabled && passwordRegisterEnabled && (
                 <div className='mt-6 text-center text-sm'>
                   <Text>
                     {t('没有账户？')}{' '}
@@ -875,7 +856,7 @@ const LoginForm = () => {
                 </>
               )}
 
-              {!status.self_use_mode_enabled && (
+              {!status.self_use_mode_enabled && passwordRegisterEnabled && (
                 <div className='mt-6 text-center text-sm'>
                   <Text>
                     {t('没有账户？')}{' '}
