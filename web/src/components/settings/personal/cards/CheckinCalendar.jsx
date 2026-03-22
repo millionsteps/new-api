@@ -37,7 +37,12 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import Turnstile from 'react-turnstile';
-import { API, showError, showSuccess, renderQuota } from '../../../../helpers';
+import {
+  API,
+  getQuotaPerUnit,
+  showError,
+  showSuccess,
+} from '../../../../helpers';
 
 const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
   const [loading, setLoading] = useState(false);
@@ -61,6 +66,12 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
   const [initialLoaded, setInitialLoaded] = useState(false);
   // 折叠状态：null 表示未确定（等待首次加载）
   const [isCollapsed, setIsCollapsed] = useState(null);
+
+  const formatUsdAmount = (quota) => {
+    const quotaPerUnit = Number(getQuotaPerUnit()) || 1;
+    const amount = Number(quota || 0) / quotaPerUnit;
+    return `$${amount.toFixed(2)}`;
+  };
 
   // 创建日期到额度的映射，方便快速查找
   const checkinRecordsMap = useMemo(() => {
@@ -133,7 +144,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
       const { success, data, message } = res.data;
       if (success) {
         showSuccess(
-          t('签到成功！获得') + ' ' + renderQuota(data.quota_awarded),
+          t('签到成功！获得') + ' ' + formatUsdAmount(data.quota_awarded),
         );
         // 刷新签到状态
         fetchCheckinStatus(currentMonth);
@@ -189,7 +200,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
     if (isCheckedIn) {
       return (
         <Tooltip
-          content={`${t('获得')} ${renderQuota(quotaAwarded)}`}
+          content={`${t('获得')} ${formatUsdAmount(quotaAwarded)}`}
           position='top'
         >
           <div className='absolute inset-0 flex flex-col items-center justify-center cursor-pointer'>
@@ -197,7 +208,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
               <Check size={14} className='text-white' strokeWidth={3} />
             </div>
             <div className='text-[10px] font-medium text-green-600 dark:text-green-400 leading-none'>
-              {renderQuota(quotaAwarded)}
+              {formatUsdAmount(quotaAwarded)}
             </div>
           </div>
         </Tooltip>
@@ -265,7 +276,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
                   ? t('今日已签到，累计签到') +
                     ` ${checkinData.stats?.total_checkins || 0} ` +
                     t('天')
-                  : t('每日签到可获得随机额度奖励')}
+                  : `${t('每日签到可获得随机额度奖励')} ($)`}
             </div>
           </div>
         </div>
@@ -298,13 +309,13 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           </div>
           <div className='text-center p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
             <div className='text-xl font-bold text-orange-600'>
-              {renderQuota(monthlyQuota, 6)}
+              {formatUsdAmount(monthlyQuota)}
             </div>
             <div className='text-xs text-gray-500'>{t('本月获得')}</div>
           </div>
           <div className='text-center p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
             <div className='text-xl font-bold text-blue-600'>
-              {renderQuota(checkinData.stats?.total_quota || 0, 6)}
+              {formatUsdAmount(checkinData.stats?.total_quota || 0)}
             </div>
             <div className='text-xs text-gray-500'>{t('累计获得')}</div>
           </div>
@@ -370,7 +381,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
         <div className='mt-3 p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
           <Typography.Text type='tertiary' className='text-xs'>
             <ul className='list-disc list-inside space-y-0.5'>
-              <li>{t('每日签到可获得随机额度奖励')}</li>
+              <li>{`${t('每日签到可获得随机额度奖励')} ($)`}</li>
               <li>{t('签到奖励将直接添加到您的账户余额')}</li>
               <li>{t('每日仅可签到一次，请勿重复签到')}</li>
             </ul>

@@ -103,7 +103,7 @@ func userCheckinWithTransaction(checkin *Checkin, userId int, quotaAwarded int) 
 		// 步骤2: 在事务中增加用户额度
 		if err := tx.Model(&User{}).Where("id = ?", userId).
 			Update("quota", gorm.Expr("quota + ?", quotaAwarded)).Error; err != nil {
-			return errors.New("签到失败：更新额度出错")
+			return errors.New("签到失败：发放签到奖励出错")
 		}
 
 		return nil
@@ -134,7 +134,7 @@ func userCheckinWithoutTransaction(checkin *Checkin, userId int, quotaAwarded in
 	if err := IncreaseUserQuota(userId, quotaAwarded, true); err != nil {
 		// 如果增加额度失败，需要回滚签到记录
 		DB.Delete(checkin)
-		return nil, errors.New("签到失败：更新额度出错")
+		return nil, errors.New("签到失败：发放签到奖励出错")
 	}
 
 	return checkin, nil
