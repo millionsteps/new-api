@@ -2,7 +2,6 @@ package controller
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -227,7 +226,7 @@ func Register(c *gin.Context) {
 			return nil
 		})
 		if txErr != nil {
-			common.ApiError(c, txErr)
+			handleRedemptionError(c, txErr)
 			return
 		}
 		cleanUser.FinalizeOAuthUserCreation(inviterId)
@@ -1082,11 +1081,7 @@ func TopUp(c *gin.Context) {
 	}
 	quota, err := model.Redeem(req.Key, id)
 	if err != nil {
-		if errors.Is(err, model.ErrRedeemFailed) {
-			common.ApiErrorI18n(c, i18n.MsgRedeemFailed)
-			return
-		}
-		common.ApiError(c, err)
+		handleRedemptionError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

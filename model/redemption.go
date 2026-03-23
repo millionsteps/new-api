@@ -6,12 +6,20 @@ import (
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"gorm.io/gorm"
 )
 
 // ErrRedeemFailed is returned when redemption fails due to database error.
 var ErrRedeemFailed = errors.New("redeem.failed")
+
+type redeemScene int
+
+const (
+	redeemSceneTopUp redeemScene = iota
+	redeemSceneRegister
+)
 
 type Redemption struct {
 	Id              int            `json:"id"`
@@ -21,6 +29,7 @@ type Redemption struct {
 	Name            string         `json:"name" gorm:"index"`
 	Quota           int            `json:"quota" gorm:"default:100"`
 	RegisterEnabled bool           `json:"register_enabled" gorm:"default:false"`
+	RegisterOnly    bool           `json:"register_only" gorm:"default:false"`
 	CreatedTime     int64          `json:"created_time" gorm:"bigint"`
 	RedeemedTime    int64          `json:"redeemed_time" gorm:"bigint"`
 	Count           int            `json:"count" gorm:"-:all"`
@@ -105,12 +114,12 @@ func GetRedemptionById(id int) (*Redemption, error) {
 	return &redemption, err
 }
 
-func redeemWithTx(tx *gorm.DB, key string, userId int, requireRegisterEnabled bool) (*Redemption, error) {
+func redeemWithTx(tx *gorm.DB, key string, userId int, scene redeemScene) (*Redemption, error) {
 	if key == "" {
-		return nil, errors.New("未提供兑换码")
+		return nil, errors.New(i18n.MsgRedemptionNotProvided)
 	}
 	if userId == 0 {
-		return nil, errors.New("无效的 user id")
+		return nil, errors.New("invalid user id")
 	}
 
 	redemption := &Redemption{}
@@ -122,17 +131,20 @@ func redeemWithTx(tx *gorm.DB, key string, userId int, requireRegisterEnabled bo
 	common.RandomSleep()
 	err := tx.Set("gorm:query_option", "FOR UPDATE").Where(keyCol+" = ?", key).First(redemption).Error
 	if err != nil {
-		return nil, errors.New("无效的兑换码")
+		return nil, errors.New(i18n.MsgRedemptionInvalid)
 	}
 	if redemption.Status != common.RedemptionCodeStatusEnabled {
-		return nil, errors.New("该兑换码已被使用")
+		return nil, errors.New(i18n.MsgRedemptionUsed)
 	}
 	if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
-		return nil, errors.New("该兑换码已过期")
+		return nil, errors.New(i18n.MsgRedemptionExpired)
 	}
 
-	if requireRegisterEnabled && !redemption.RegisterEnabled {
-		return nil, errors.New("该兑换码不可用于注册")
+	if scene == redeemSceneRegister && !redemption.RegisterEnabled {
+		return nil, errors.New(i18n.MsgRedemptionRegisterDisabled)
+	}
+	if scene == redeemSceneTopUp && redemption.RegisterOnly {
+		return nil, errors.New(i18n.MsgRedemptionRegisterOnly)
 	}
 
 	err = tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
@@ -154,11 +166,14 @@ func Redeem(key string, userId int) (quota int, err error) {
 	var redemption *Redemption
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		var txErr error
-		redemption, txErr = redeemWithTx(tx, key, userId, false)
+		redemption, txErr = redeemWithTx(tx, key, userId, redeemSceneTopUp)
 		return txErr
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())
+		if isRedemptionBusinessError(err) {
+			return 0, err
+		}
 		return 0, ErrRedeemFailed
 	}
 
@@ -167,7 +182,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 }
 
 func RedeemWithTx(tx *gorm.DB, key string, userId int) (quota int, err error) {
-	redemption, err := redeemWithTx(tx, key, userId, false)
+	redemption, err := redeemWithTx(tx, key, userId, redeemSceneTopUp)
 	if err != nil {
 		return 0, err
 	}
@@ -175,7 +190,7 @@ func RedeemWithTx(tx *gorm.DB, key string, userId int) (quota int, err error) {
 }
 
 func RedeemWithRegisterTx(tx *gorm.DB, key string, userId int) (quota int, err error) {
-	redemption, err := redeemWithTx(tx, key, userId, true)
+	redemption, err := redeemWithTx(tx, key, userId, redeemSceneRegister)
 	if err != nil {
 		return 0, err
 	}
@@ -191,7 +206,7 @@ func (redemption *Redemption) SelectUpdate() error {
 }
 
 func (redemption *Redemption) Update() error {
-	return DB.Model(redemption).Select("name", "status", "quota", "register_enabled", "redeemed_time", "expired_time").Updates(redemption).Error
+	return DB.Model(redemption).Select("name", "status", "quota", "register_enabled", "register_only", "redeemed_time", "expired_time").Updates(redemption).Error
 }
 
 func (redemption *Redemption) Delete() error {
@@ -219,4 +234,18 @@ func DeleteInvalidRedemptions() (int64, error) {
 		now,
 	).Delete(&Redemption{})
 	return result.RowsAffected, result.Error
+}
+
+func isRedemptionBusinessError(err error) bool {
+	switch err.Error() {
+	case i18n.MsgRedemptionInvalid,
+		i18n.MsgRedemptionUsed,
+		i18n.MsgRedemptionExpired,
+		i18n.MsgRedemptionNotProvided,
+		i18n.MsgRedemptionRegisterOnly,
+		i18n.MsgRedemptionRegisterDisabled:
+		return true
+	default:
+		return false
+	}
 }

@@ -268,7 +268,7 @@ func CompleteOAuthRegistration(c *gin.Context) {
 
 	user, err := createOAuthUserWithRedemption(provider, oauthUser, session, request.RedemptionCode)
 	if err != nil {
-		common.ApiError(c, err)
+		handleRedemptionError(c, err)
 		return
 	}
 	if user.Status != common.UserStatusEnabled {

@@ -74,6 +74,33 @@ const renderStatus = (status, record, t) => {
 };
 
 /**
+ * Render registration usage rule
+ */
+const renderRegistrationRule = (record, t) => {
+  if (record.register_only) {
+    return (
+      <Tag color='orange' shape='circle'>
+        {t('仅限注册')}
+      </Tag>
+    );
+  }
+
+  if (record.register_enabled) {
+    return (
+      <Tag color='green' shape='circle'>
+        {t('注册可用')}
+      </Tag>
+    );
+  }
+
+  return (
+    <Tag color='grey' shape='circle'>
+      {t('普通兑换')}
+    </Tag>
+  );
+};
+
+/**
  * Get redemption code table column definitions
  */
 export const getRedemptionsColumns = ({
@@ -118,18 +145,10 @@ export const getRedemptionsColumns = ({
       },
     },
     {
-      title: t('可用于注册'),
-      dataIndex: 'register_enabled',
-      render: (value) => {
-        return value ? (
-          <Tag color='green' shape='circle'>
-            {t('是')}
-          </Tag>
-        ) : (
-          <Tag color='grey' shape='circle'>
-            {t('否')}
-          </Tag>
-        );
+      title: t('注册规则'),
+      key: 'registration_rule',
+      render: (text, record) => {
+        return <div>{renderRegistrationRule(record, t)}</div>;
       },
     },
     {
@@ -159,7 +178,6 @@ export const getRedemptionsColumns = ({
       fixed: 'right',
       width: 205,
       render: (text, record) => {
-        // Create dropdown menu items for more operations
         const moreMenuItems = [
           {
             node: 'item',

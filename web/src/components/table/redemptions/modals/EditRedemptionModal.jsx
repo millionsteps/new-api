@@ -63,6 +63,7 @@ const EditRedemptionModal = (props) => {
     quota: 100000,
     count: 1,
     register_enabled: false,
+    register_only: false,
     expired_time: null,
   });
 
@@ -106,7 +107,10 @@ const EditRedemptionModal = (props) => {
     let localInputs = { ...values };
     localInputs.count = parseInt(localInputs.count) || 0;
     localInputs.quota = parseInt(localInputs.quota) || 0;
-    localInputs.register_enabled = Boolean(localInputs.register_enabled);
+    localInputs.register_only = Boolean(localInputs.register_only);
+    localInputs.register_enabled = Boolean(
+      localInputs.register_enabled || localInputs.register_only,
+    );
     localInputs.name = name;
     if (!localInputs.expired_time) {
       localInputs.expired_time = 0;
@@ -264,12 +268,26 @@ const EditRedemptionModal = (props) => {
                       />
                     </Col>
                     <Col span={24}>
-                      <Form.Checkbox field='register_enabled' noLabel>
-                        {t('可用于注册')}
+                      <Form.Checkbox
+                        field='register_enabled'
+                        noLabel
+                        disabled={Boolean(values.register_only)}
+                      >
+                        {t('注册可用')}
                       </Form.Checkbox>
                       <div className='mt-1 text-xs text-gray-500'>
                         {t(
-                          '勾选后该兑换码才可用于注册；未勾选时只能走普通兑换流程。注册成功时会自动兑换额度。',
+                          '开启后可在注册流程中使用；关闭后仅可用于普通兑换或充值。',
+                        )}
+                      </div>
+                    </Col>
+                    <Col span={24}>
+                      <Form.Checkbox field='register_only' noLabel>
+                        {t('仅限注册')}
+                      </Form.Checkbox>
+                      <div className='mt-1 text-xs text-gray-500'>
+                        {t(
+                          '开启后会自动勾选“注册可用”，且该兑换码不能再用于普通兑换或充值。',
                         )}
                       </div>
                     </Col>

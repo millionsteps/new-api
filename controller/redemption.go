@@ -83,6 +83,9 @@ func AddRedemption(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 		return
 	}
+	if redemption.RegisterOnly {
+		redemption.RegisterEnabled = true
+	}
 	var keys []string
 	for i := 0; i < redemption.Count; i++ {
 		key := common.GetUUID()
@@ -93,6 +96,7 @@ func AddRedemption(c *gin.Context) {
 			CreatedTime:     common.GetTimestamp(),
 			Quota:           redemption.Quota,
 			RegisterEnabled: redemption.RegisterEnabled,
+			RegisterOnly:    redemption.RegisterOnly,
 			ExpiredTime:     redemption.ExpiredTime,
 		}
 		err = cleanRedemption.Insert()
@@ -147,10 +151,14 @@ func UpdateRedemption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
+		if redemption.RegisterOnly {
+			redemption.RegisterEnabled = true
+		}
 		// If you add more fields, please also update redemption.Update()
 		cleanRedemption.Name = redemption.Name
 		cleanRedemption.Quota = redemption.Quota
 		cleanRedemption.RegisterEnabled = redemption.RegisterEnabled
+		cleanRedemption.RegisterOnly = redemption.RegisterOnly
 		cleanRedemption.ExpiredTime = redemption.ExpiredTime
 	}
 	if statusOnly != "" {
